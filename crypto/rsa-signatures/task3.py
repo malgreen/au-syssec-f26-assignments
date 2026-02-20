@@ -129,6 +129,150 @@ def rsa_pss_sign(K: (int, int), msg: str) -> str:
     S = i2osp(s, s.bit_length())
     return S
 
+# Signature verification
+def RSASSA_PSS_VERIFY(n:int,e:int,M: bytes,S: bytes):
+    
+    # Length checking
+    k = n / 8 # Octet length?
+    if (len(S) != k):
+        exit("RSASSA_PSS_VERIFY: Invalid signature")
+        
+    # RSA verification
+    
+    ## Convert the signature S to integer signature representative s
+    s = os2ip(S)
+    
+    # Apply RSAVP1
+    m = RSAVP1(n,e,s)
+    
+    # Convert the message m to EM of length emLen = \ceil ((modBits -1) / 8) octets
+    EM = i2osp(m)
+    
+    modBits = n.bit_length()
+    
+    # modBits???
+    Result = EMSA_PSS_VERIFY(M,EM,modBits-1)
+    
+    if Result: 
+        print("Verified")
+    else: 
+        print("Failed verification")
+    
+    
+def RSAVP1(n: int,e:int ,s:int): 
+    if (0 > s & s > n - 1):
+        exit("RSAVP1: Signature representative out of range")
+        
+    m:int = (s ** e) % n
+    
+    return m
+
+#https://stackoverflow.com/questions/39964383/implementation-of-i2osp-and-os2ip
+# def OS2IP(X):
+#     """Convert octet string to nonnegative integer"""
+#     return int.from_bytes(X,'big',signed=False)
+#     xLen = len(X)
+#     x_ = []
+#     x = 0
+    
+#     # # Convert each octet to int
+#     # for i in X:
+#     #     x_.append(int(i))
+    
+#     for i in range (xLen):
+#         x += x_[xLen-1-i] * 256 **(xLen-1-i)
+        
+#     return x
+
+
+# def I2OSP(x: int): # Skip xLen?
+#     """Convert int to octet string"""
+#     return x.to_bytes(x.bit_length(),'big',signed=False)
+
+#     # Check x
+#     if (x >= 256 ** xLen):
+#         exit("I2OSP: Integer too large")
+
+#     # xLen = len(X)
+#     x_ = map(int,str(x))
+#     X = []
+    
+#     for i in range (xLen):
+#         X[i] = x_(xLen-1-i) * 256 **(xLen-1-i)
+        
+#     return X
+        
+        
+def EMSA_PSS_VERIFY(M:bytes,EM:bytes,emBits:int,sLen:int):
+    
+    emLen = len(EM)
+    # 1. If the length of M is greater than the input limitation for the hash function (2^61 - 1 octets for SHA-1), output "inconsistent" and stop.
+    if (len(M) > emBits):
+        print("EMSA: Inconsistent") 
+        return 0
+    
+    # 2. Let mHash = Hash(M), an octet string of length hLen.
+    # mHash = (2**61 -1 * M)
+    sha = SHA256.new()
+    mHash = sha.update(M)
+    
+    hLen = len(mHash)
+    
+    # 3. If emLen < hLen + sLen + 2, output "inconsistent" and stop.
+    if (emLen < (hLen + sLen + 2)):
+
+        print("EMSA: Inconsistent") 
+        return 0
+    
+    # 4. If the rightmost octet of EM does not have hexadecimal value 0xbc, output "inconsistent" and stop.
+    if (EM[emBits] != "0xbc"):
+        print("EMSA: Inconsistent") 
+        return 0
+        
+    # 5. Let maskedDB be the leftmost emLen - hLen - 1 octets of EM, and let H be the next hLen octets.
+    maskedDB = [0, emLen - hLen - 1]
+    
+    H = [emLen-hLen]
+    
+    # 6. If the leftmost 8emLen - emBits bits of the leftmost octet in maskedDB are not all equal to zero, output "inconsistent" and stop.
+    if (maskedDB[i] != "0x00" for i in range (0,8*emLen-emBits)):
+        print("EMSA: Inconsistent") 
+        return 0
+        
+    # 7. Let dbMask = MGF(H,emLen-hLen-1)
+    dbMask = sha.update(H)
+    
+    # 8. Let DB = maskedDB \xor dbMask.
+    DB = maskedDB ^ dbMask
+    
+    # 9. Set the leftmost 8emLen - emBits bits of the leftmost octet in DB to zero.
+    for i in range(0,8*emLen-emBits):
+        DB[i] = "0x00"
+    
+    # 10. If the emLen - hLen - sLen - 2 leftmost octets of DB are not zero or if the octet at position emLen - hLen - sLen - 1 (the leftmost position is "position 1") does not have hexadecimal value 0x01, output "inconsistent" and stop.
+    if (DB[i] != "0x00" for i in range (0,emLen-hLen-sLen-2) or DB[emLen-hLen-sLen-1] != "0x01"):
+        print("EMSA: Inconsisten")
+        return 0
+        
+    # 11. Let salt be the last sLen octets of DB
+    salt = DB[len(DB),len(DB)]
+    
+    # 12. M' = (0x)00 00 00 00 00 00 00 00 || mHash || salt ; M' is an octet string of length 8 + hLen + sLen with eight initial zero octets.
+    M_ = b'00 00 00 00 00 00 00 00' | mHash | salt
+    
+    # 13. Let H' = Hash(M'), an octet string of length hLen.
+    H_ = sha.update(M_)
+    
+    # 14. If H = H', output "consistent".  Otherwise, output "inconsistent".
+    if (H != H_):
+        print("EMSA: Inconsistent") 
+        return 0
+    
+    print("Consistent")
+    return 1
+        
+       
+
 key = {
     "N": 371889671565463942367954290447998038346508378412906393777224051429051866836270954172499990068084527065676474226497111078968545581678986502752163234735983816266651693007104629564770588543440325988804899244026631454677152614550651753904265619022279606900854783220794261348526584500572594674241974376658646262189145567709769283251762560694400572465726082170701222210125885879948029487762112037364302466621095872978842538310928567591123149566093238885840827787725484819592305856326685166124473340756939283273191368795635230585057700831386876568628042763954626872483226230726070327952344844951558544115548586636052706914014075072597547439479078647882373329479504585286691260425177891094162273338040018179134808494455923922717948840276144321923065878921845420515282024665589279942270471448095668407812152450984626338832634493655952560368436225132213475907022280926435314387018516054719994558495487875943756155686597582159926754401125523324782051873744809420732606183411460067830997859604055522162664350947395824442728925713410041007101654162502467551010035917636120605311839200181621229630617301263497489510018550869800755860897410215159281789917201419826531657145964968297805989867061674852348721636750658827357413205101488792521091589981404570296658441503336458633338300985575834647724288265282075539621587480939642528645512718665635452724107573834271459600842563974109351704846578828052291579660479831933733829817544636651156032908222750063965543826732409413035742157829582222252734488171239821643196742895521745046223816042173861970296931343093,
     "e": 65537,
