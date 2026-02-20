@@ -21,11 +21,8 @@ def i2osp_correct(x, xLen):
             x //= 256
         for i in range(xLen - len(digits)):
             digits.append(0)
-        #return digits[::-1]
-        out = ""
-        for d in digits[::-1]:
-            out += str(d)
-        return int(out)
+        # return digits[::-1]
+        return "".join(map(str, digits[::-1]))
 
 def os2ip_correct(X):
         xLen = len(X)
@@ -87,6 +84,7 @@ def emsa_pss(msg: bytes, em_bits: int) -> str:
     msg_q.extend(salt)
     msg_q = bytes(msg_q)
 
+
     sha = SHA256.new()
     sha.update(msg_q)
     msg_q_hash = sha.digest()
@@ -98,10 +96,11 @@ def emsa_pss(msg: bytes, em_bits: int) -> str:
     db.extend(salt)
     db = bytes(db)
 
+
     db_mask = msg_q_hash # because our MGF is also SHA256
     # masked_db = db ^ db_mask
     masked_db = bytearray(x ^ y for x, y in zip(db, db_mask))
-    print(masked_db)
+    # print(masked_db)
 
     masked_db[0] &= (0xFF >> (8 * em_len - em_bits)) # zero out the leftmost bits in the leftmost byte
 
@@ -278,8 +277,14 @@ key = {
     "e": 65537,
     "d": 704568893365996414634381564099738149008766018880352583250389516986117849511017078933561484164113512626663658894202079519073224826025284515707073968013356123473720716016177814049268991090563241641173826085736881908481665803073543531470464884600780249891002443123159680922256356992984726021689282602303480295260508949763781626218862260306314935121554769895436304867857472899533236069096837472290866690721678555475033014522085560753995500147374230067033109511648948556293212483692514318203063250750499374696054423093087230666665193359812156617175163800422695919354373048267301268419249907457651114182355953189601619513839264336154715153143181760327057682901353432608272230770333279835817092659376585627242871270763190026448575121249167925520900626946692100223477766446675500698219892577482685806648569534530985175051992333296150184354063500559711754878535236849404328109388664845446795312989910854704312228939433256879160251993,
 }
-sys.set_int_max_str_digits(6144) # necessary due to our 3072 bit exponents
+sys.set_int_max_str_digits(9999) # necessary due to our 3072 bit exponents
 
 print("==> os2ip:\n", os2ip("hello!"))
 print("==> i2osp:\n", i2osp(256, 2))
 print("==> sign:\n", rsa_pss_sign((key["N"], key["d"]), "Hello, world!"))
+message = "Hello, world!"
+signature = rsa_pss_sign((key["N"], key["d"]), message)
+print(len(signature.lstrip("0")))
+
+print(type(signature))
+RSASSA_PSS_VERIFY(key["N"], key["e"], message, signature)
