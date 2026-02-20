@@ -1,0 +1,141 @@
+import base64
+import json
+import math
+import secrets
+import string
+import traceback
+from urllib.parse import quote as url_quote
+from flask import Flask, request, make_response, redirect, url_for
+from secret_data import rsa_key
+from Crypto.Hash import SHA256
+from Crypto.Random import get_random_bytes
+import sys
+
+def i2osp_correct(x, xLen):
+        if x >= 256**xLen:
+            raise ValueError("integer too large")
+        digits = []
+
+        while x:
+            digits.append(int(x % 256))
+            x //= 256
+        for i in range(xLen - len(digits)):
+            digits.append(0)
+        #return digits[::-1]
+        out = ""
+        for d in digits[::-1]:
+            out += str(d)
+        return int(out)
+
+def os2ip_correct(X):
+        xLen = len(X)
+        X = X[::-1]
+        x = 0
+        for i in range(xLen):
+            x += X[i] * 256**i
+        return x
+
+def os2ip(s: str) -> int:
+    return os2ip_correct(s.encode()) # TODO
+    s_len = len(s)
+    x = [0] * s_len 
+
+    s_bytes = s.encode()
+    i = 1
+    for b in s_bytes:
+        x[s_len - i] = b * 256 ** b
+        i += 1
+    
+    return sum(x)
+
+
+def i2osp(x: int, x_len: int) -> str:
+    return i2osp_correct(x, x_len)
+    assert x >= 0 and x_len >= 0
+    if x >= 256 ** x_len:
+        raise "integer too large"
+    out = ""
+    digits = []
+
+    x_str = str(x)
+    i = x_len - 1
+    while i > 0:
+        digit = int(x_str[i])
+        digits.append(256 ** digit)
+        i -= 1
+    
+    for d in digits:
+        out += str(d)
+    return out
+
+def emsa_pss(msg: bytes, em_bits: int) -> str:
+    s_len = 32
+    em_len = math.ceil(em_bits/8)
+
+    sha = SHA256.new()
+    sha.update(msg)
+    msg_hash = sha.digest()
+    h_len = len(msg_hash)
+    if em_len < h_len + s_len + 2:
+        raise "encoding error" 
+
+    salt = get_random_bytes(s_len)
+
+    msg_q = bytearray()
+    msg_q.append(0x0000000000000000)
+    msg_q.extend(msg_hash)
+    msg_q.extend(salt)
+    msg_q = bytes(msg_q)
+
+    sha = SHA256.new()
+    sha.update(msg_q)
+    msg_q_hash = sha.digest()
+
+    ps = get_random_bytes(em_len - s_len - h_len)
+    db = bytearray()
+    db.extend(ps)
+    db.append(0x01)
+    db.extend(salt)
+    db = bytes(db)
+
+    db_mask = msg_q_hash # because our MGF is also SHA256
+    # masked_db = db ^ db_mask
+    masked_db = bytearray(x ^ y for x, y in zip(db, db_mask))
+    print(masked_db)
+
+    masked_db[0] &= (0xFF >> (8 * em_len - em_bits)) # zero out the leftmost bits in the leftmost byte
+
+    output = bytearray()
+    output.extend(masked_db)
+    output.extend(msg_q_hash)
+    output.append(0xbc)
+
+    return str(output)
+
+def rsa_sp1(K: (int, int), msg_r: int) -> int:
+    N, d = K
+    if not 0 <= msg_r < N:
+        raise "message representative out of range"
+    return pow(msg_r, d, N)
+
+def rsa_pss_sign(K: (int, int), msg: str) -> str:
+    N, d = K
+
+    mod_bits = N.bit_length()
+    em = emsa_pss(msg.encode(), mod_bits - 1)
+
+    m = os2ip(em)
+    s = rsa_sp1(K, m)
+    S = i2osp(s, s.bit_length())
+    return S
+
+key = {
+    "N": 371889671565463942367954290447998038346508378412906393777224051429051866836270954172499990068084527065676474226497111078968545581678986502752163234735983816266651693007104629564770588543440325988804899244026631454677152614550651753904265619022279606900854783220794261348526584500572594674241974376658646262189145567709769283251762560694400572465726082170701222210125885879948029487762112037364302466621095872978842538310928567591123149566093238885840827787725484819592305856326685166124473340756939283273191368795635230585057700831386876568628042763954626872483226230726070327952344844951558544115548586636052706914014075072597547439479078647882373329479504585286691260425177891094162273338040018179134808494455923922717948840276144321923065878921845420515282024665589279942270471448095668407812152450984626338832634493655952560368436225132213475907022280926435314387018516054719994558495487875943756155686597582159926754401125523324782051873744809420732606183411460067830997859604055522162664350947395824442728925713410041007101654162502467551010035917636120605311839200181621229630617301263497489510018550869800755860897410215159281789917201419826531657145964968297805989867061674852348721636750658827357413205101488792521091589981404570296658441503336458633338300985575834647724288265282075539621587480939642528645512718665635452724107573834271459600842563974109351704846578828052291579660479831933733829817544636651156032908222750063965543826732409413035742157829582222252734488171239821643196742895521745046223816042173861970296931343093,
+    "e": 65537,
+    "d": 704568893365996414634381564099738149008766018880352583250389516986117849511017078933561484164113512626663658894202079519073224826025284515707073968013356123473720716016177814049268991090563241641173826085736881908481665803073543531470464884600780249891002443123159680922256356992984726021689282602303480295260508949763781626218862260306314935121554769895436304867857472899533236069096837472290866690721678555475033014522085560753995500147374230067033109511648948556293212483692514318203063250750499374696054423093087230666665193359812156617175163800422695919354373048267301268419249907457651114182355953189601619513839264336154715153143181760327057682901353432608272230770333279835817092659376585627242871270763190026448575121249167925520900626946692100223477766446675500698219892577482685806648569534530985175051992333296150184354063500559711754878535236849404328109388664845446795312989910854704312228939433256879160251993,
+}
+sys.set_int_max_str_digits(6144) # necessary due to our 3072 bit exponents
+
+print("==> os2ip:\n", os2ip("hello!"))
+print("==> i2osp:\n", i2osp(256, 2))
+print("==> sign:\n", rsa_pss_sign((key["N"], key["d"]), "Hello, world!"))
