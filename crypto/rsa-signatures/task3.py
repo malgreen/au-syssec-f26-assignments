@@ -1,39 +1,62 @@
-import base64
-import json
-import math
-import secrets
-import string
-import traceback
-from urllib.parse import quote as url_quote
-from flask import Flask, request, make_response, redirect, url_for
-from secret_data import rsa_key
+import sys
 from Crypto.Hash import SHA256
 from Crypto.Random import get_random_bytes
-import sys
+
+# TODO: we are just using the PyCryptodome versions of os2ip and i2osp
+from Crypto.Util.number import bytes_to_long, long_to_bytes
+
+
+
+def byte_length(input: int) -> int:
+    return (input.bit_length() + 7) // 8
+
+def sha256_hash(input: bytes) -> bytes:
+    sha = SHA256.new()
+    sha.update(input)
+    return sha.digest()
+
+def mgf1(mgf_seed: str, mask_len: int) -> str:
+    h_len = 32
+    T = ""
+    for counter in range((mask_len // h_len) - 1):
+        C = i2osp(counter, 4)
+        print(type(mgf_seed), type(C))
+        T += str(sha256_hash(mgf_seed + C))
+    return T[:mask_len]
+
+
+def bytes_xor(x: bytes, y: bytes) -> bytes:
+    return bytes(a ^ b for a, b in zip(x, y))
+    # out = bytearray(x if len(x) >= len(y) else y)
+    # # print(y)
+    # for i, b in enumerate(y if len(x) >= len(y) else x):
+    #     out[i] ^= b
+    # return out
 
 def i2osp_correct(x, xLen):
-        if x >= 256**xLen:
-            raise ValueError("integer too large")
-        digits = []
+    if x >= 256**xLen:
+        raise ValueError("integer too large")
+    digits = []
 
-        while x:
-            digits.append(int(x % 256))
-            x //= 256
-        for i in range(xLen - len(digits)):
-            digits.append(0)
-        # return digits[::-1]
-        return "".join(map(str, digits[::-1]))
+    while x:
+        digits.append(int(x % 256))
+        x //= 256
+    for i in range(xLen - len(digits)):
+        digits.append(0)
+    return digits[::-1]
+    # return "".join(map(str, digits[::-1]))
 
 def os2ip_correct(X):
-        xLen = len(X)
-        X = X[::-1]
-        x = 0
-        for i in range(xLen):
-            x += X[i] * 256**i
-        return x
+    xLen = len(X)
+    X = X[::-1]
+    x = 0
+    for i in range(xLen):
+        x += X[i] * 256**i
+    return x
 
-def os2ip(s: str) -> int:
-    return os2ip_correct(s.encode()) # TODO
+def os2ip(s: bytes) -> int:
+    return bytes_to_long(s)
+    return os2ip_correct(s)
     s_len = len(s)
     x = [0] * s_len 
 
@@ -47,6 +70,7 @@ def os2ip(s: str) -> int:
 
 
 def i2osp(x: int, x_len: int) -> str:
+    return long_to_bytes(x, x_len)
     return i2osp_correct(x, x_len)
     assert x >= 0 and x_len >= 0
     if x >= 256 ** x_len:
@@ -65,51 +89,51 @@ def i2osp(x: int, x_len: int) -> str:
         out += str(d)
     return out
 
-def emsa_pss(msg: bytes, em_bits: int) -> str:
+def emsa_pss(M: bytes, em_bits: int) -> str:
     s_len = 32
-    em_len = math.ceil(em_bits/8)
-
-    sha = SHA256.new()
-    sha.update(msg)
-    msg_hash = sha.digest()
-    h_len = len(msg_hash)
+    em_len = em_bits // 8
+    
+    m_hash = sha256_hash(M.encode())
+    h_len = len(m_hash)
     if em_len < h_len + s_len + 2:
         raise "encoding error" 
 
     salt = get_random_bytes(s_len)
 
-    msg_q = bytearray()
-    msg_q.append(0x0000000000000000)
-    msg_q.extend(msg_hash)
-    msg_q.extend(salt)
-    msg_q = bytes(msg_q)
+    # M_ = bytearray()
+    # M_.extend(bytes(8)) # (0x)00 00 00 00 00 00 00 00
+    # M_.extend(m_hash)
+    # M_.extend(salt)
+    M_ = bytes(8) + m_hash + salt
+    assert len(M_) == 8 + h_len + s_len, f"invalid M' length. expected {8 + h_len + s_len}, got {len(M_)}"
 
 
-    sha = SHA256.new()
-    sha.update(msg_q)
-    msg_q_hash = sha.digest()
+    H = sha256_hash(M_)
+    assert len(H) == h_len
 
-    ps = get_random_bytes(em_len - s_len - h_len)
-    db = bytearray()
-    db.extend(ps)
-    db.append(0x01)
-    db.extend(salt)
-    db = bytes(db)
+    PS = bytearray(em_len - s_len - h_len - 2)
 
+    # DB = bytearray()
+    # DB.extend(PS)
+    # DB.extend(bytes(0x01))
+    # DB.extend(salt)
+    DB = PS + bytes.fromhex("01") + salt
+    assert len(DB) == em_len - h_len - 1
 
-    db_mask = msg_q_hash # because our MGF is also SHA256
-    # masked_db = db ^ db_mask
-    masked_db = bytearray(x ^ y for x, y in zip(db, db_mask))
-    # print(masked_db)
+    db_mask = mgf1(H, em_len - h_len - 1)
+    
+    masked_DB = bytearray(bytes_xor(DB, db_mask.encode()))
+    # masked_DB[0] &= (0xFF >> (8 * em_len - em_bits)) # zero out the leftmost bits in the leftmost byte
+    masked_DB = bytes(1) + masked_DB[1:]  
 
-    masked_db[0] &= (0xFF >> (8 * em_len - em_bits)) # zero out the leftmost bits in the leftmost byte
+    # EM = bytearray()
+    # EM.extend(masked_DB)
+    # EM.extend(H)
+    # EM.extend(bytes(0xbc))
+    EM = masked_DB + H + bytes.fromhex("bc")
 
-    output = bytearray()
-    output.extend(masked_db)
-    output.extend(msg_q_hash)
-    output.append(0xbc)
-
-    return str(output)
+    assert len(EM) == em_len, f"incorrect output length. expected {em_len}, got {len(EM)}"
+    return EM
 
 def rsa_sp1(K: (int, int), msg_r: int) -> int:
     N, d = K
@@ -117,15 +141,20 @@ def rsa_sp1(K: (int, int), msg_r: int) -> int:
         raise "message representative out of range"
     return pow(msg_r, d, N)
 
-def rsa_pss_sign(K: (int, int), msg: str) -> str:
+def rsa_pss_sign(K: (int, int), M: str) -> str:
     N, d = K
+    k = byte_length(N)
 
     mod_bits = N.bit_length()
-    em = emsa_pss(msg.encode(), mod_bits - 1)
+    
+    em = emsa_pss(M, mod_bits - 1)
 
     m = os2ip(em)
+    
     s = rsa_sp1(K, m)
-    S = i2osp(s, s.bit_length())
+    
+    S = i2osp(s, k)
+    assert len(S) == k, f"incorrect signature size. expected {k}, got {len(S)}"
     return S
 
 # Signature verification
@@ -279,12 +308,11 @@ key = {
 }
 sys.set_int_max_str_digits(9999) # necessary due to our 3072 bit exponents
 
-print("==> os2ip:\n", os2ip("hello!"))
+print("==> os2ip:\n", os2ip(b"hello!"))
 print("==> i2osp:\n", i2osp(256, 2))
 print("==> sign:\n", rsa_pss_sign((key["N"], key["d"]), "Hello, world!"))
 message = "Hello, world!"
 signature = rsa_pss_sign((key["N"], key["d"]), message)
-print(len(signature.lstrip("0")))
 
 print(type(signature))
 RSASSA_PSS_VERIFY(key["N"], key["e"], message, signature)
