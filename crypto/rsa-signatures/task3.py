@@ -20,7 +20,6 @@ def mgf1(mgf_seed: str, mask_len: int) -> str:
     T = ""
     for counter in range((mask_len // h_len) - 1):
         C = i2osp(counter, 4)
-        print(type(mgf_seed), type(C))
         T += str(sha256_hash(mgf_seed + C))
     return T[:mask_len]
 
@@ -123,8 +122,9 @@ def emsa_pss(M: bytes, em_bits: int) -> str:
     db_mask = mgf1(H, em_len - h_len - 1)
     
     masked_DB = bytearray(bytes_xor(DB, db_mask.encode()))
-    # masked_DB[0] &= (0xFF >> (8 * em_len - em_bits)) # zero out the leftmost bits in the leftmost byte
-    masked_DB = bytes(1) + masked_DB[1:]  
+    masked_DB[0] &= (0xFF >> (8 * em_len - em_bits)) # zero out the leftmost bits in the leftmost byte
+    # TODO: incorrect
+    # masked_DB = bytes(1) + masked_DB[1:]  
 
     # EM = bytearray()
     # EM.extend(masked_DB)
@@ -137,167 +137,111 @@ def emsa_pss(M: bytes, em_bits: int) -> str:
 
 def rsa_sp1(K: (int, int), msg_r: int) -> int:
     N, d = K
-    if not 0 <= msg_r < N:
-        raise "message representative out of range"
+    assert 0 <= msg_r < N, "message representative out of range"
     return pow(msg_r, d, N)
 
-def rsa_pss_sign(K: (int, int), M: str) -> str:
+def rsa_pss_sign(K: (int, int), M: str) -> bytes:
     N, d = K
     k = byte_length(N)
-
     mod_bits = N.bit_length()
     
     em = emsa_pss(M, mod_bits - 1)
+    print(em[-1:].hex())
 
     m = os2ip(em)
     
     s = rsa_sp1(K, m)
     
     S = i2osp(s, k)
+    print(S[-1:].hex())
     assert len(S) == k, f"incorrect signature size. expected {k}, got {len(S)}"
     return S
 
 # Signature verification
 def RSASSA_PSS_VERIFY(n:int,e:int,M: bytes,S: bytes):
-    
-    # Length checking
-    k = n / 8 # Octet length?
-    if (len(S) != k):
-        exit("RSASSA_PSS_VERIFY: Invalid signature")
+    k = byte_length(n)
+    mod_bits = n.bit_length()
+    assert len(S) == k, f"incorrect signature size. expected {k}, got {len(S)}"
         
-    # RSA verification
-    
-    ## Convert the signature S to integer signature representative s
     s = os2ip(S)
     
-    # Apply RSAVP1
     m = RSAVP1(n,e,s)
     
-    # Convert the message m to EM of length emLen = \ceil ((modBits -1) / 8) octets
-    EM = i2osp(m)
+    EM = i2osp(m, k)
+    print(EM[-1:].hex())
     
-    modBits = n.bit_length()
-    
-    # modBits???
-    Result = EMSA_PSS_VERIFY(M,EM,modBits-1)
+    Result = EMSA_PSS_VERIFY(M, EM, mod_bits - 1)
     
     if Result: 
         print("Verified")
-    else: 
+    else:
         print("Failed verification")
     
     
-def RSAVP1(n: int,e:int ,s:int): 
+def RSAVP1(n: int, e: int , s: int) -> int:
     if (0 > s & s > n - 1):
         exit("RSAVP1: Signature representative out of range")
-        
-    m:int = (s ** e) % n
+    
+    #m: int = (s ** e) % n
+    m: int = pow(s, e, n)
     
     return m
-
-#https://stackoverflow.com/questions/39964383/implementation-of-i2osp-and-os2ip
-# def OS2IP(X):
-#     """Convert octet string to nonnegative integer"""
-#     return int.from_bytes(X,'big',signed=False)
-#     xLen = len(X)
-#     x_ = []
-#     x = 0
-    
-#     # # Convert each octet to int
-#     # for i in X:
-#     #     x_.append(int(i))
-    
-#     for i in range (xLen):
-#         x += x_[xLen-1-i] * 256 **(xLen-1-i)
         
-#     return x
 
-
-# def I2OSP(x: int): # Skip xLen?
-#     """Convert int to octet string"""
-#     return x.to_bytes(x.bit_length(),'big',signed=False)
-
-#     # Check x
-#     if (x >= 256 ** xLen):
-#         exit("I2OSP: Integer too large")
-
-#     # xLen = len(X)
-#     x_ = map(int,str(x))
-#     X = []
-    
-#     for i in range (xLen):
-#         X[i] = x_(xLen-1-i) * 256 **(xLen-1-i)
-        
-#     return X
-        
-        
-def EMSA_PSS_VERIFY(M:bytes,EM:bytes,emBits:int,sLen:int):
-    
-    emLen = len(EM)
-    # 1. If the length of M is greater than the input limitation for the hash function (2^61 - 1 octets for SHA-1), output "inconsistent" and stop.
-    if (len(M) > emBits):
-        print("EMSA: Inconsistent") 
-        return 0
+def EMSA_PSS_VERIFY(M: bytes, EM: bytes, em_bits: int) -> bool:
+    s_len = 32
+    em_len = len(EM)
+    # assert len(M) <= 
     
     # 2. Let mHash = Hash(M), an octet string of length hLen.
     # mHash = (2**61 -1 * M)
-    sha = SHA256.new()
-    mHash = sha.update(M)
+    m_hash = sha256_hash(M.encode())
     
-    hLen = len(mHash)
+    h_len = len(m_hash)
     
     # 3. If emLen < hLen + sLen + 2, output "inconsistent" and stop.
-    if (emLen < (hLen + sLen + 2)):
-
-        print("EMSA: Inconsistent") 
-        return 0
+    assert not (em_len < h_len + s_len + 2), "inconsistent"
     
     # 4. If the rightmost octet of EM does not have hexadecimal value 0xbc, output "inconsistent" and stop.
-    if (EM[emBits] != "0xbc"):
-        print("EMSA: Inconsistent") 
-        return 0
+    assert EM[len(EM) - 1] == bytes.fromhex("bc"), "inconsistent"
         
     # 5. Let maskedDB be the leftmost emLen - hLen - 1 octets of EM, and let H be the next hLen octets.
-    maskedDB = [0, emLen - hLen - 1]
+    masked_DB = EM[:em_len - h_len - 1]
     
-    H = [emLen-hLen]
+    H = EM[em_len - h_len - 1:]
     
     # 6. If the leftmost 8emLen - emBits bits of the leftmost octet in maskedDB are not all equal to zero, output "inconsistent" and stop.
-    if (maskedDB[i] != "0x00" for i in range (0,8*emLen-emBits)):
-        print("EMSA: Inconsistent") 
-        return 0
-        
-    # 7. Let dbMask = MGF(H,emLen-hLen-1)
-    dbMask = sha.update(H)
+    assert masked_DB[0] == (0xFF >> (8 * em_len - em_bits)), "inconsistent" # TODO?
     
+    # 7. Let dbMask = MGF(H,emLen-hLen-1)
+    db_mask = mgf1(H, em_len - h_len - 1)
+
     # 8. Let DB = maskedDB \xor dbMask.
-    DB = maskedDB ^ dbMask
+    DB = bytes_xor(masked_DB, db_mask)
     
     # 9. Set the leftmost 8emLen - emBits bits of the leftmost octet in DB to zero.
-    for i in range(0,8*emLen-emBits):
-        DB[i] = "0x00"
+    DB &= (0xFF >> (8 * em_len - em_bits))    
     
     # 10. If the emLen - hLen - sLen - 2 leftmost octets of DB are not zero or if the octet at position emLen - hLen - sLen - 1 (the leftmost position is "position 1") does not have hexadecimal value 0x01, output "inconsistent" and stop.
-    if (DB[i] != "0x00" for i in range (0,emLen-hLen-sLen-2) or DB[emLen-hLen-sLen-1] != "0x01"):
-        print("EMSA: Inconsisten")
-        return 0
+    for byte in DB[:em_len - h_len - s_len - 2]:
+        if byte != 0x00: 
+            raise "inconsistent"
+    assert DB[em_len - h_len - s_len - 1] == 0x01, "inconsistent"
         
     # 11. Let salt be the last sLen octets of DB
-    salt = DB[len(DB),len(DB)]
+    salt = DB[s_len:]
     
     # 12. M' = (0x)00 00 00 00 00 00 00 00 || mHash || salt ; M' is an octet string of length 8 + hLen + sLen with eight initial zero octets.
-    M_ = b'00 00 00 00 00 00 00 00' | mHash | salt
-    
+    M_ = bytes.fromhex("0000000000000000") + m_hash + salt
+
     # 13. Let H' = Hash(M'), an octet string of length hLen.
-    H_ = sha.update(M_)
+    H_ = sha256_hash(M_)
     
     # 14. If H = H', output "consistent".  Otherwise, output "inconsistent".
-    if (H != H_):
-        print("EMSA: Inconsistent") 
-        return 0
+    assert H != H_, "inconsistent"
     
-    print("Consistent")
-    return 1
+    print("consistent")
+    return True
         
        
 
@@ -308,11 +252,11 @@ key = {
 }
 sys.set_int_max_str_digits(9999) # necessary due to our 3072 bit exponents
 
-print("==> os2ip:\n", os2ip(b"hello!"))
-print("==> i2osp:\n", i2osp(256, 2))
-print("==> sign:\n", rsa_pss_sign((key["N"], key["d"]), "Hello, world!"))
+#print("==> os2ip:\n", os2ip(b"hello!"))
+#print("==> i2osp:\n", i2osp(256, 2))
+#print("==> sign:\n", rsa_pss_sign((key["N"], key["d"]), "Hello, world!"))
 message = "Hello, world!"
 signature = rsa_pss_sign((key["N"], key["d"]), message)
-
+print(signature[len(signature) - 1:].hex())
 print(type(signature))
 RSASSA_PSS_VERIFY(key["N"], key["e"], message, signature)
