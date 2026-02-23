@@ -1,10 +1,34 @@
-import sys
 from Crypto.Hash import SHA256
-from Crypto.PublicKey import RSA
-from Crypto.Random import get_random_bytes
+from Crypto.Random import get_random_bytes#, random
+from Crypto.Util.number import bytes_to_long, long_to_bytes, getPrime, GCD, inverse
 
-# TODO: we are just using the PyCryptodome versions of os2ip and i2osp
-from Crypto.Util.number import bytes_to_long, long_to_bytes
+def main():
+    N, d, e = generate_rsa_key()
+    message = "Hello, world!"
+    message_bytes = message.encode()
+
+    signature = rsa_pss_sign((N, d), message_bytes)
+
+    result = rsa_pss_verify((N, e), message_bytes, signature)
+
+    print("SUCCESS" if result else "FAILURE")
+
+
+# --- Key Generation ---
+def generate_rsa_key() -> (int, int, int): # N, d, e
+    e = 65537
+    bits = 3072 // 2 # TODO... idk
+    
+    p = getPrime(bits) # library function to find a prime number of some bit length
+    q = getPrime(bits)
+    N = p * q
+    
+    phi = (p - 1) * (q - 1)
+
+    d = inverse(e, phi) # library function to find modular multiplicative inverse
+    
+    return (N, d, e)
+
 
 # --- Utilities ---
 def ceiling_division(n, d): 
@@ -83,6 +107,7 @@ def i2osp(x: int, x_len: int) -> str:
     for d in digits:
         out += str(d)
     return out
+
 
 # --- Signing ---
 def emsa_pss_encode(M: bytes, em_bits: int) -> str:
@@ -214,14 +239,6 @@ def rsa_pss_verify(K: (int, int), M: bytes, S: bytes):
     
     return emsa_pss_verify(M, EM, mod_bits - 1)
 
-
-key = RSA.generate(3072)
-
-message = "Hello, world!"
-message_bytes = message.encode()
-
-signature = rsa_pss_sign((key.n, key.d), message_bytes)
-
-result = rsa_pss_verify((key.n, key.e), message_bytes, signature)
-
-print("SUCCESS" if result else "FAILURE")
+# --- MAIN ---
+if __name__ == "__main__":
+    main()
