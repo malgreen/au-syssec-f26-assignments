@@ -1,9 +1,10 @@
 import sys
 from Crypto.Hash import SHA256
+from Crypto.PublicKey import RSA
 from Crypto.Random import get_random_bytes
 
 # TODO: we are just using the PyCryptodome versions of os2ip and i2osp
-from Crypto.Util.number import bytes_to_long, long_to_bytes
+from Crypto.Util.number import bytes_to_long, long_to_bytes, ceil_div
 
 
 
@@ -90,7 +91,7 @@ def i2osp(x: int, x_len: int) -> str:
 
 def emsa_pss(M: bytes, em_bits: int) -> str:
     s_len = 32
-    em_len = em_bits // 8
+    em_len = ceil_div(em_bits, 8)
     
     m_hash = sha256_hash(M.encode())
     h_len = len(m_hash)
@@ -144,31 +145,37 @@ def rsa_pss_sign(K: (int, int), M: str) -> bytes:
     N, d = K
     k = byte_length(N)
     mod_bits = N.bit_length()
+    k = ceil_div(mod_bits, 8)
+    print(k)
     
     em = emsa_pss(M, mod_bits - 1)
-    print(em[-1:].hex())
+    print("em", em[-1:].hex())
 
     m = os2ip(em)
     
     s = rsa_sp1(K, m)
     
     S = i2osp(s, k)
-    print(S[-1:].hex())
+    print("S: ", S[-1:].hex())
     assert len(S) == k, f"incorrect signature size. expected {k}, got {len(S)}"
+    print("S len: ", len(S))
     return S
 
 # Signature verification
-def RSASSA_PSS_VERIFY(n:int,e:int,M: bytes,S: bytes):
+def RSASSA_PSS_VERIFY(n:int,e:int,M: bytes, S: bytes):
     k = byte_length(n)
     mod_bits = n.bit_length()
+    
     assert len(S) == k, f"incorrect signature size. expected {k}, got {len(S)}"
         
     s = os2ip(S)
     
     m = RSAVP1(n,e,s)
-    
-    EM = i2osp(m, k)
-    print(EM[-1:].hex())
+    # print("m:", m)
+
+    em_len = ceil_div(mod_bits - 1, 8)
+    EM = i2osp(m, em_len)
+    print("EM:", EM[-1:].hex())
     
     Result = EMSA_PSS_VERIFY(M, EM, mod_bits - 1)
     
@@ -182,15 +189,16 @@ def RSAVP1(n: int, e: int , s: int) -> int:
     if (0 > s & s > n - 1):
         exit("RSAVP1: Signature representative out of range")
     
-    #m: int = (s ** e) % n
-    m: int = pow(s, e, n)
+    # m: int = pow(s, e, n)
     
-    return m
+    return pow(s, e, n)
         
 
 def EMSA_PSS_VERIFY(M: bytes, EM: bytes, em_bits: int) -> bool:
     s_len = 32
     em_len = len(EM)
+    # em_len = ceil_div(em_bits, 8)
+    print("EM_LEN: ", em_len)
     # assert len(M) <= 
     
     # 2. Let mHash = Hash(M), an octet string of length hLen.
@@ -203,7 +211,7 @@ def EMSA_PSS_VERIFY(M: bytes, EM: bytes, em_bits: int) -> bool:
     assert not (em_len < h_len + s_len + 2), "inconsistent"
     
     # 4. If the rightmost octet of EM does not have hexadecimal value 0xbc, output "inconsistent" and stop.
-    assert EM[len(EM) - 1] == bytes.fromhex("bc"), "inconsistent"
+    assert EM[-1:] == bytes.fromhex("bc"), "inconsistent"
         
     # 5. Let maskedDB be the leftmost emLen - hLen - 1 octets of EM, and let H be the next hLen octets.
     masked_DB = EM[:em_len - h_len - 1]
@@ -243,20 +251,13 @@ def EMSA_PSS_VERIFY(M: bytes, EM: bytes, em_bits: int) -> bool:
     print("consistent")
     return True
         
-       
 
-key = {
-    "N": 371889671565463942367954290447998038346508378412906393777224051429051866836270954172499990068084527065676474226497111078968545581678986502752163234735983816266651693007104629564770588543440325988804899244026631454677152614550651753904265619022279606900854783220794261348526584500572594674241974376658646262189145567709769283251762560694400572465726082170701222210125885879948029487762112037364302466621095872978842538310928567591123149566093238885840827787725484819592305856326685166124473340756939283273191368795635230585057700831386876568628042763954626872483226230726070327952344844951558544115548586636052706914014075072597547439479078647882373329479504585286691260425177891094162273338040018179134808494455923922717948840276144321923065878921845420515282024665589279942270471448095668407812152450984626338832634493655952560368436225132213475907022280926435314387018516054719994558495487875943756155686597582159926754401125523324782051873744809420732606183411460067830997859604055522162664350947395824442728925713410041007101654162502467551010035917636120605311839200181621229630617301263497489510018550869800755860897410215159281789917201419826531657145964968297805989867061674852348721636750658827357413205101488792521091589981404570296658441503336458633338300985575834647724288265282075539621587480939642528645512718665635452724107573834271459600842563974109351704846578828052291579660479831933733829817544636651156032908222750063965543826732409413035742157829582222252734488171239821643196742895521745046223816042173861970296931343093,
-    "e": 65537,
-    "d": 704568893365996414634381564099738149008766018880352583250389516986117849511017078933561484164113512626663658894202079519073224826025284515707073968013356123473720716016177814049268991090563241641173826085736881908481665803073543531470464884600780249891002443123159680922256356992984726021689282602303480295260508949763781626218862260306314935121554769895436304867857472899533236069096837472290866690721678555475033014522085560753995500147374230067033109511648948556293212483692514318203063250750499374696054423093087230666665193359812156617175163800422695919354373048267301268419249907457651114182355953189601619513839264336154715153143181760327057682901353432608272230770333279835817092659376585627242871270763190026448575121249167925520900626946692100223477766446675500698219892577482685806648569534530985175051992333296150184354063500559711754878535236849404328109388664845446795312989910854704312228939433256879160251993,
-}
-sys.set_int_max_str_digits(9999) # necessary due to our 3072 bit exponents
+key = RSA.generate(3072)
 
-#print("==> os2ip:\n", os2ip(b"hello!"))
-#print("==> i2osp:\n", i2osp(256, 2))
-#print("==> sign:\n", rsa_pss_sign((key["N"], key["d"]), "Hello, world!"))
 message = "Hello, world!"
-signature = rsa_pss_sign((key["N"], key["d"]), message)
+
+signature = rsa_pss_sign((key.n, key.d), message)
+
 print(signature[len(signature) - 1:].hex())
 print(type(signature))
-RSASSA_PSS_VERIFY(key["N"], key["e"], message, signature)
+RSASSA_PSS_VERIFY(key.n, key.e, message, signature)
