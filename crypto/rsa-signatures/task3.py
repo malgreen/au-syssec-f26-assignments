@@ -16,12 +16,12 @@ def sha256_hash(input: bytes) -> bytes:
     sha.update(input)
     return sha.digest()
 
-def mgf1(mgf_seed: str, mask_len: int) -> str:
+def mgf1(mgf_seed: str, mask_len: int) -> bytes:
     h_len = 32
-    T = ""
-    for counter in range((mask_len // h_len) - 1):
+    T = bytearray()
+    for counter in range(ceil_div(mask_len, h_len)):
         C = i2osp(counter, 4)
-        T += str(sha256_hash(mgf_seed + C))
+        T += sha256_hash(mgf_seed + C)
     return T[:mask_len]
 
 
@@ -89,14 +89,13 @@ def i2osp(x: int, x_len: int) -> str:
         out += str(d)
     return out
 
-def emsa_pss(M: bytes, em_bits: int) -> str:
+def emsa_pss_encode(M: bytes, em_bits: int) -> str:
     s_len = 32
     em_len = ceil_div(em_bits, 8)
     
-    m_hash = sha256_hash(M.encode())
+    m_hash = sha256_hash(M)
     h_len = len(m_hash)
-    if em_len < h_len + s_len + 2:
-        raise "encoding error" 
+    assert em_len >= h_len + s_len + 2, "encoding error"
 
     salt = get_random_bytes(s_len)
 
@@ -107,22 +106,22 @@ def emsa_pss(M: bytes, em_bits: int) -> str:
     M_ = bytes(8) + m_hash + salt
     assert len(M_) == 8 + h_len + s_len, f"invalid M' length. expected {8 + h_len + s_len}, got {len(M_)}"
 
-
     H = sha256_hash(M_)
     assert len(H) == h_len
 
-    PS = bytearray(em_len - s_len - h_len - 2)
-
+    PS = bytes(em_len - s_len - h_len - 2)
+    
     # DB = bytearray()
     # DB.extend(PS)
     # DB.extend(bytes(0x01))
     # DB.extend(salt)
     DB = PS + bytes.fromhex("01") + salt
+    print("DB(sign): ", DB.hex())
     assert len(DB) == em_len - h_len - 1
 
     db_mask = mgf1(H, em_len - h_len - 1)
     
-    masked_DB = bytearray(bytes_xor(DB, db_mask.encode()))
+    masked_DB = bytearray(bytes_xor(DB, db_mask))
     masked_DB[0] &= (0xFF >> (8 * em_len - em_bits)) # zero out the leftmost bits in the leftmost byte
     # TODO: incorrect
     # masked_DB = bytes(1) + masked_DB[1:]  
@@ -133,6 +132,7 @@ def emsa_pss(M: bytes, em_bits: int) -> str:
     # EM.extend(bytes(0xbc))
     EM = masked_DB + H + bytes.fromhex("bc")
 
+    print("EM(sign):", EM.hex())
     assert len(EM) == em_len, f"incorrect output length. expected {em_len}, got {len(EM)}"
     return EM
 
@@ -145,20 +145,17 @@ def rsa_pss_sign(K: (int, int), M: str) -> bytes:
     N, d = K
     k = byte_length(N)
     mod_bits = N.bit_length()
-    k = ceil_div(mod_bits, 8)
-    print(k)
+    k = ceil_div(mod_bits, 8) # TODO
     
-    em = emsa_pss(M, mod_bits - 1)
-    print("em", em[-1:].hex())
+    em = emsa_pss_encode(M.encode(), mod_bits - 1)
 
     m = os2ip(em)
     
     s = rsa_sp1(K, m)
     
     S = i2osp(s, k)
-    print("S: ", S[-1:].hex())
+
     assert len(S) == k, f"incorrect signature size. expected {k}, got {len(S)}"
-    print("S len: ", len(S))
     return S
 
 # Signature verification
@@ -171,13 +168,11 @@ def RSASSA_PSS_VERIFY(n:int,e:int,M: bytes, S: bytes):
     s = os2ip(S)
     
     m = RSAVP1(n,e,s)
-    # print("m:", m)
 
     em_len = ceil_div(mod_bits - 1, 8)
     EM = i2osp(m, em_len)
-    print("EM:", EM[-1:].hex())
     
-    Result = EMSA_PSS_VERIFY(M, EM, mod_bits - 1)
+    Result = EMSA_PSS_VERIFY(M.encode(), EM, mod_bits - 1)
     
     if Result: 
         print("Verified")
@@ -198,12 +193,11 @@ def EMSA_PSS_VERIFY(M: bytes, EM: bytes, em_bits: int) -> bool:
     s_len = 32
     em_len = len(EM)
     # em_len = ceil_div(em_bits, 8)
-    print("EM_LEN: ", em_len)
     # assert len(M) <= 
     
     # 2. Let mHash = Hash(M), an octet string of length hLen.
     # mHash = (2**61 -1 * M)
-    m_hash = sha256_hash(M.encode())
+    m_hash = sha256_hash(M)
     
     h_len = len(m_hash)
     
@@ -212,35 +206,39 @@ def EMSA_PSS_VERIFY(M: bytes, EM: bytes, em_bits: int) -> bool:
     
     # 4. If the rightmost octet of EM does not have hexadecimal value 0xbc, output "inconsistent" and stop.
     assert EM[-1:] == bytes.fromhex("bc"), "inconsistent"
-        
+    print("EM(verify):", EM.hex())
     # 5. Let maskedDB be the leftmost emLen - hLen - 1 octets of EM, and let H be the next hLen octets.
     masked_DB = EM[:em_len - h_len - 1]
     
-    H = EM[em_len - h_len - 1:]
+    H = EM[em_len - h_len - 1:-1]
     
     # 6. If the leftmost 8emLen - emBits bits of the leftmost octet in maskedDB are not all equal to zero, output "inconsistent" and stop.
-    assert masked_DB[0] == (0xFF >> (8 * em_len - em_bits)), "inconsistent" # TODO?
-    
+    assert masked_DB[0] & (0xFF >> (8 * em_len - em_bits)), "inconsistent" # TODO?
+
+
     # 7. Let dbMask = MGF(H,emLen-hLen-1)
     db_mask = mgf1(H, em_len - h_len - 1)
-
+    
     # 8. Let DB = maskedDB \xor dbMask.
-    DB = bytes_xor(masked_DB, db_mask)
+    DB = bytearray(bytes_xor(masked_DB, db_mask))
+    print("DB(verify): ", DB.hex())
     
     # 9. Set the leftmost 8emLen - emBits bits of the leftmost octet in DB to zero.
-    DB &= (0xFF >> (8 * em_len - em_bits))    
+    DB[0] &= (0xFF >> (8 * em_len - em_bits))    
     
     # 10. If the emLen - hLen - sLen - 2 leftmost octets of DB are not zero or if the octet at position emLen - hLen - sLen - 1 (the leftmost position is "position 1") does not have hexadecimal value 0x01, output "inconsistent" and stop.
-    for byte in DB[:em_len - h_len - s_len - 2]:
-        if byte != 0x00: 
-            raise "inconsistent"
-    assert DB[em_len - h_len - s_len - 1] == 0x01, "inconsistent"
+    print(DB.startswith(bytes(em_len - h_len - s_len - 2)))
+
+    for byte in DB[:em_len - h_len - s_len - 2 - 1]: # '-1' because of indexing
+        print(byte)
+        assert byte == 0x00, "inconsistent"
+    assert DB[em_len - h_len - s_len - 1 - 1] == 0x01, "inconsistent"
         
     # 11. Let salt be the last sLen octets of DB
     salt = DB[s_len:]
     
     # 12. M' = (0x)00 00 00 00 00 00 00 00 || mHash || salt ; M' is an octet string of length 8 + hLen + sLen with eight initial zero octets.
-    M_ = bytes.fromhex("0000000000000000") + m_hash + salt
+    M_ = bytes(8) + m_hash + salt
 
     # 13. Let H' = Hash(M'), an octet string of length hLen.
     H_ = sha256_hash(M_)
@@ -255,9 +253,8 @@ def EMSA_PSS_VERIFY(M: bytes, EM: bytes, em_bits: int) -> bool:
 key = RSA.generate(3072)
 
 message = "Hello, world!"
+# message_bytes = message.encode()
 
 signature = rsa_pss_sign((key.n, key.d), message)
 
-print(signature[len(signature) - 1:].hex())
-print(type(signature))
 RSASSA_PSS_VERIFY(key.n, key.e, message, signature)
