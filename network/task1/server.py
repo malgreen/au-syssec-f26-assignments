@@ -9,9 +9,7 @@ def main():
     socket_icmp.setsockopt(socket.SOL_IP, socket.IP_HDRINCL, 1)
     while 1:
         packet = socket_icmp.recv(1024)
-        # print(packet)
-        packet = struct.unpack("!B", packet[0:1])
-        print(packet[0] >> 4)  # should be version 4 (4-bit field in IPv4 header)
+        print(packet[28:]) # IPv4 Header = 20 bytes, ICMP header = 8 bytes, content = rest
 
 
 if __name__ == "__main__":
