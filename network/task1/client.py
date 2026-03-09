@@ -1,13 +1,23 @@
 import socket
 import struct
+from Crypto.Cipher import AES
+from Crypto.Random import get_random_bytes
 
+AES_KEY = b"e87e570582047b12e8c71b983ee0e075"
 
 def main():
-    msg = b"Hello, World!"
-
     socket_icmp = socket.socket(
         family=socket.AF_INET, type=socket.SOCK_RAW, proto=socket.IPPROTO_ICMP
     )
+
+    addr = input("--- Input IP Address ---\n")
+    # is there some way to check it is valid?
+
+    msg = input("--- Input Message ---\n")
+
+    aes = AES.new(key=AES_KEY, mode=AES.MODE_GCM)
+    ciphertext, tag = aes.encrypt_and_digest(msg.encode())
+    body = bytes(aes.nonce) + tag + ciphertext
 
     # first, we have to construct the header.
     # see https://en.wikipedia.org/wiki/Internet_Control_Message_Protocol for details
@@ -18,13 +28,15 @@ def main():
         "!BBHI", type, code, 0, 0
     )  # B = 1 byte, H = 2 bytes, I = 4 bytes
 
-    checksum = ip_checksum(header + msg)
+    checksum = ip_checksum(header + body)
     header = struct.pack("!BBHI", type, code, checksum, 0)
 
-    packet = header + msg
-    address = ("127.0.0.1", 1)  # tuple of (ip, port)
+    packet = header + body
 
-    print(socket_icmp.sendto(packet, address))
+    if socket_icmp.sendto(packet, (addr, 1)):
+        print("--- Message Sent ---")
+    else:
+        print("--- ERROR ---")
     socket_icmp.close()
 
 
@@ -41,16 +53,11 @@ def ip_checksum(input: bytes) -> int:
     ]
 
     for word in words:
-        # print(word.hex())
-        # word_struct.unpack('H', struct.pack('h', int.from_bytes(word)))
-        # word_int = int.from_bytes(word)
-        # sum += ~word_int
         output += word
         if (output & 0xFFFF) != output:
             output &= 0xFFFF
             output += 1
-
-    # output = (~output) & 0xFFFF
+    
     return (~output) & 0xFFFF
 
 
