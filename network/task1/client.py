@@ -1,16 +1,17 @@
 import socket
 import struct
+from sys import byteorder
 from Crypto.Cipher import AES
-from Crypto.Random import get_random_bytes
 
 AES_KEY = b"e87e570582047b12e8c71b983ee0e075"
+
 
 def main():
     socket_icmp = socket.socket(
         family=socket.AF_INET, type=socket.SOCK_RAW, proto=socket.IPPROTO_ICMP
     )
 
-    addr = input("--- Input IP Address ---\n")
+    addr = input("\n--- Input IP Address ---\n")
     # is there some way to check it is valid?
 
     msg = input("--- Input Message ---\n")
@@ -19,10 +20,10 @@ def main():
     ciphertext, tag = aes.encrypt_and_digest(msg.encode())
     body = bytes(aes.nonce) + tag + ciphertext
 
-    # first, we have to construct the header.
+    # first, we have to construct the header
     # see https://en.wikipedia.org/wiki/Internet_Control_Message_Protocol for details
     # we are going to use reserved type '47'
-    type = 47  # field 1 1 byte
+    type = 47  # 1 byte
     code = 0  # 1 byte
     header = struct.pack(
         "!BBHI", type, code, 0, 0
@@ -33,15 +34,17 @@ def main():
 
     packet = header + body
 
-    if socket_icmp.sendto(packet, (addr, 1)):
-        print("--- Message Sent ---")
-    else:
-        print("--- ERROR ---")
+    try:
+        if socket_icmp.sendto(packet, (addr, 1)):
+            print("--- Message Sent ---")
+        else:
+            raise Exception("Unknown Error")
+        socket_icmp.close()
+    except Exception as e:
+        print(e)
+
     socket_icmp.close()
-
-
-# def build_header
-# def build_body
+    main()
 
 
 def ip_checksum(input: bytes) -> int:
@@ -49,7 +52,12 @@ def ip_checksum(input: bytes) -> int:
     output = 0
 
     words = [  # split into 16-bit words
-        int.from_bytes(input[i : i + 2]) for i in range(0, len(input), 2)
+        int.from_bytes(input[i : i + 2], "big")
+        for i in range(
+            0,
+            len(input),
+            2,
+        )
     ]
 
     for word in words:
@@ -57,7 +65,7 @@ def ip_checksum(input: bytes) -> int:
         if (output & 0xFFFF) != output:
             output &= 0xFFFF
             output += 1
-    
+
     return (~output) & 0xFFFF
 
 
