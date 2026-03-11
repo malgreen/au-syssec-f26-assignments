@@ -1,6 +1,4 @@
-from pydoc import plain
 import socket
-import struct
 
 from Crypto.Cipher import AES
 
@@ -17,16 +15,19 @@ def main():
             packet = socket_icmp.recv(1024)
             if not packet[20] == 47:
                 continue
-            print("\n--- RECEIVED RECEIVED ---")
+            print("\n--- MESSAGE RECEIVED ---")
             # (IPv4 Header = 20 bytes, ICMP header = 8 bytes, nonce = 16 bytes, tag = 16 bytes, ciphertext = rest)
             nonce = packet[28:44]
             tag = packet[44:60]
             ciphertext = packet[60:]
 
             aes = AES.new(key=AES_KEY, mode=AES.MODE_GCM, nonce=nonce)
+            try:
+                plaintext = aes.decrypt_and_verify(ciphertext, tag).decode()
+                print(plaintext)
+            except Exception as e:
+                print(e)
 
-            plaintext = aes.decrypt_and_verify(ciphertext, tag).decode()
-            print(plaintext)
             print("-------------------------\n")
             print("--- WAITING FOR MESSAGE ---")
         except Exception as e:

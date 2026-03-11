@@ -1,16 +1,11 @@
 import socket
 import struct
-from sys import byteorder
 from Crypto.Cipher import AES
 
 AES_KEY = b"e87e570582047b12e8c71b983ee0e075"
 
 
 def main():
-    socket_icmp = socket.socket(
-        family=socket.AF_INET, type=socket.SOCK_RAW, proto=socket.IPPROTO_ICMP
-    )
-
     addr = input("\n--- Input IP Address ---\n")
     # is there some way to check it is valid?
 
@@ -23,27 +18,28 @@ def main():
     # first, we have to construct the header
     # see https://en.wikipedia.org/wiki/Internet_Control_Message_Protocol for details
     # we are going to use reserved type '47'
+    # struct chars: B = 1 byte, H = 2 bytes, I = 4 bytes
     type = 47  # 1 byte
     code = 0  # 1 byte
-    header = struct.pack(
-        "!BBHI", type, code, 0, 0
-    )  # B = 1 byte, H = 2 bytes, I = 4 bytes
+    header = struct.pack("!BBHI", type, code, 0, 0)
 
     checksum = ip_checksum(header + body)
     header = struct.pack("!BBHI", type, code, checksum, 0)
 
     packet = header + body
 
+    socket_icmp = socket.socket(
+        family=socket.AF_INET, type=socket.SOCK_RAW, proto=socket.IPPROTO_ICMP
+    )
     try:
         if socket_icmp.sendto(packet, (addr, 1)):
             print("--- Message Sent ---")
         else:
             raise Exception("Unknown Error")
-        socket_icmp.close()
     except Exception as e:
-        print(e)
-
+        print(e)    
     socket_icmp.close()
+
     main()
 
 
