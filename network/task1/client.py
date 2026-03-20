@@ -7,7 +7,6 @@ AES_KEY = b"e87e570582047b12e8c71b983ee0e075"
 
 def main():
     addr = input("\n--- Input IP Address ---\n")
-    # is there some way to check it is valid?
 
     msg = input("--- Input Message ---\n")
 
@@ -37,7 +36,7 @@ def main():
         else:
             raise Exception("Unknown Error")
     except Exception as e:
-        print(e)    
+        print(e)
     socket_icmp.close()
 
     main()
