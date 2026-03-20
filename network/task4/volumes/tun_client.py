@@ -5,10 +5,15 @@ import os
 import ssl
 import struct
 import time
+import select
+import socket
 
 from scapy.all import *
 
-SERVER_IP = "10.9.0.11"
+GATEWAY_IP = "10.9.0.11"
+INTERFACE_IP = "192.168.53.99"
+NETWORK_IP = "192.168.60.0"
+
 SERVER_PORT = 9090
 
 TUNSETIFF = 0x400454CA
@@ -43,8 +48,8 @@ def setup_tun():
     ifname = ifname_bytes.decode("UTF-8")[:16].strip("\x00")
     print("Interface Name: {}".format(ifname))
     os.system(f"ip link set dev {ifname} up")
-    os.system(f"ip addr add 192.168.53.99/24 dev {ifname}")
-    os.system(f"ip route add 192.168.60.0/24 dev {ifname} onlink via {SERVER_IP}")
+    os.system(f"ip addr add {INTERFACE_IP}/24 dev {ifname}")
+    os.system(f"ip route add {NETWORK_IP}/24 dev {ifname} onlink via {GATEWAY_IP}")
     return tun
 
 
@@ -52,11 +57,11 @@ def setup_ssl() -> ssl.SSLSocket:
     tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     ssl_ctx.load_verify_locations("./cert.pem")
-    ssl_sock = ssl_ctx.wrap_socket(tcp_sock, server_hostname=SERVER_IP)
+    ssl_sock = ssl_ctx.wrap_socket(tcp_sock, server_hostname=GATEWAY_IP)
     while True:
         try:
             print("Trying to connect...")
-            ssl_sock.connect((SERVER_IP, SERVER_PORT))
+            ssl_sock.connect((GATEWAY_IP, SERVER_PORT))
             print("SSL connected")
             break  # just exit the loop on successful connection
         except KeyboardInterrupt:

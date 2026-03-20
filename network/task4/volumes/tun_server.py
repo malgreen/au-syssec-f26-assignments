@@ -5,10 +5,14 @@ import ssl
 import os
 import subprocess
 from scapy.all import *
+import socket
+import select
+import struct
 
 PORT = 9090
-CLIENT_IP_EXTERNAL = "10.9.0.5"
-CLIENT_IP_INTERNAL = "192.168.53.99"
+GATEWAY_IP = "10.9.0.5"
+INTERFACE_IP = "192.168.60.11"
+NETWORK_IP = "192.168.53.99"
 LISTEN_IP = "0.0.0.0"
 TUNSETIFF = 0x400454CA
 IFF_TUN = 0x0001
@@ -42,10 +46,8 @@ def setup_tun():
     ifname = ifname_bytes.decode("UTF-8")[:16].strip("\x00")
     print("Interface Name: {}".format(ifname))
     os.system(f"ip link set dev {ifname} up")
-    os.system(f"ip addr add 192.168.60.11/24 dev {ifname}")
-    os.system(
-        f"ip route add {CLIENT_IP_INTERNAL} dev {ifname} onlink via {CLIENT_IP_EXTERNAL}"
-    )
+    os.system(f"ip addr add {INTERFACE_IP}/24 dev {ifname}")
+    os.system(f"ip route add {NETWORK_IP} dev {ifname} onlink via {GATEWAY_IP}")
     return tun
 
 
