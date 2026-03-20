@@ -60,7 +60,6 @@ def setup_ssl() -> ssl.SSLSocket:
     print("TCP client connected")
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ssl_ctx.load_cert_chain("./cert.pem", "./key.pem")
-    ssl_ctx.verify_mode = ssl.CERT_NONE
     ssl_sock = ssl_ctx.wrap_socket(tcp_conn, server_side=True)
     return ssl_sock
 
