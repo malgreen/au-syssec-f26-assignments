@@ -1,0 +1,3 @@
+[submodule "software/log4shell/log4shell-dockerized"]
+	path = software/log4shell/log4shell-dockerized
+	url = https://github.com/alex-ilgayev/log4shell-dockerized.git
