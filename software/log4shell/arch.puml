@@ -1,0 +1,11 @@
+@startuml Log4Shell Architecture
+
+node "Vulnerable Program"
+node "Malicious JNDI+LDAP Server"
+node "Malicious HTTP Server"
+
+"Vulnerable Program" --> "Malicious JNDI+LDAP Server": JNDI Request
+"Malicious JNDI+LDAP Server" ..> "Malicious HTTP Server": Redirect
+"Vulnerable Program" <-- "Malicious HTTP Server": Java class download
+
+@enduml

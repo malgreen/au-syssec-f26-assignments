@@ -1,0 +1,24 @@
+name: log4shell
+services:
+  log4shell-victim:
+    container_name: "log4shell-victim"
+    image: ghcr.io/christophetd/log4shell-vulnerable-app@sha256:6f88430688108e512f7405ac3c73d47f5c370780b94182854ea2cddc6bd59929
+    platform: linux/amd64
+    environment:
+      JAVA_TOOL_OPTIONS: >
+        -Dcom.sun.jndi.ldap.object.trustURLCodebase=true
+    ports:
+      - 8080:8080
+
+  
+  log4shell-ldap:
+    container_name: "log4shell-ldap"
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 1389:1389 # LDAP port
+      - 8888:8888 # HTTP port
+
+

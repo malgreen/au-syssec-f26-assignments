@@ -44,7 +44,7 @@ Collect experimental evidence of the malicious behavior through Wireshark, showi
 For your convenience, the web server has been included here, in the subfolder "simple-website".
 Run the web server with the command:
 
-```
+```sh
 flask --app main.py run
 ```
 
